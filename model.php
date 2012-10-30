@@ -280,7 +280,7 @@
 		 }
 	 }
 	 function __set( $key, $value ) {
-		 if( isset( $key ) && isset( $value ) && isset($this->$key)) {
+		 if( isset( $key ) && isset( $value ) ) {
 			 $this->$key = $value;
 		 }
 		 else {
