@@ -1,13 +1,15 @@
 <?php
- require_once 'bd.php';
-
  abstract class Model
  {
 	 private $the_query;
 	 private $map = array();
 	 private $link_to;
 
-	 
+	 private $variables;
+	 private $publics_variables;
+	 private $privates_variables;
+
+	 private $dont_parse = array('class_name', 'map', 'comment', 'link_to', 'variables', 'publics_variables', 'privates_variables', 'dont_parse');
 
 	 function __construct() {;}
 
@@ -21,7 +23,7 @@
 	 }
 
 	 function _save() {
-	 	if( isset($this->id) ) {
+	 	if( isset($this->variables['id']) ) {
 		 	$this->update_object();
 	 	}
 	 	else {
@@ -55,10 +57,10 @@
 	 	if(!empty($array)) {
 	 		$where = 'WHERE ';
 	 		foreach( $array as $key=>$value) {
-	 			$where.=$key.' = "'.$value.'" AND ';
+	 			$where[] =$key.' = "'.$value;
 	 		}
 
-	 		$where = substr($where, 0, -4);
+	 		$where = implode(' AND ', $where);
 
 	 		$query = 'SELECT '.$CLASS_NAME.'.* FROM '.$CLASS_NAME.' '.$where;
 	 		$this->the_query = $query;
@@ -71,7 +73,7 @@
 
 	 function _query( $query = null ) {
 	 	if( !is_null($query) ){
-	 		return $this->single_object_query($query);
+	 		return $this->multiple_objects($query);
 	 	}
 	 }
 
@@ -84,10 +86,10 @@
 	 		if(isset($array['where'])) {
 		 		$where = 'WHERE ';
 		 		foreach( $array['where'] as $value) {
-		 			$where .= $value['key'].' '.$value['compare'].' "'.$value['value'].'" AND ';
+		 			$where[] = $value['key'].' '.$value['compare'].' "'.$value['value'];
 		 		}
 
-		 		$where = substr($where, 0, -4);
+		 		$where = implode(' AND ', $where);
 		 	}
 		 	if( isset($array['order']) ){
 		 		$orderby = (isset($array['order']['by'])?$array['order']['by']:'DESC');
@@ -102,7 +104,7 @@
 		 	$CLASS_NAME = $this->link_to;
 
 	 		$query = 'SELECT '.$CLASS_NAME.'.* FROM '.$CLASS_NAME.' '.$where.' '.$order.' '.$limit;
-	 		$this->the_query = $query;
+	 		$thi->the_query = $query;
 			return $this->multiple_objects( $query );
 	 	}
 	 	else {
@@ -126,9 +128,9 @@
 	 		foreach( $order_by as $key=>$value) {
 	 			$order = ( !is_int($key) ? $value : 'ASC' );
 	 			$order_by = ( !is_int($key) ? $key : $value );
-	 			$by.=$order_by.' '.$order.',';
+	 			$by[] =$order_by.' '.$order;
 	 		}
-	 		$sort = substr($by, 0, -1);
+	 		$sort = implode(',', $by);
 	 		$query = 'SELECT '.$CLASS_NAME.'.* FROM '.$CLASS_NAME.' ORDER BY '.$sort;
 	 		$this->the_query = $query;
 	 		return $this->multiple_objects( $query );
@@ -144,7 +146,7 @@
 		 if( isset($values) ){
 		 	 $sets = '';
 			 foreach( $values[0] as $key=>$value ) {
-			 	$this->$key = $value;
+			 	$this->variables[$key] = $value;
 			 }
 			 if($this->add_object())
 			 	return $this;
@@ -157,17 +159,17 @@
 		 $values = func_get_args();
 		 if( isset($values) ){
 			 foreach( $values[0] as $key=>$value ) {
-			 	$this->$key = $value;
+			 	$this->variables[$key] = $value;
 			 }
 		 }
 		 return $this;
 	 }
 
 	 function _count() {
-	 	$CLASS_NAME = $this->link_to;
-		 $query = mysql_query( 'SELECT COUNT(id) AS count FROM '.$CLASS_NAME );
-
-		 $count = mysql_fetch_assoc( $query );
+	 	 $CLASS_NAME = $this->link_to;
+		 $query = 'SELECT COUNT(id) AS count FROM '.$CLASS_NAME;
+		 $STH = Connection::prepare()->query($query);
+		 $count = $STH->fetch();
 
 		 return $count['count'];
 	 }
@@ -186,16 +188,23 @@
 	 }
 
 	 function _delete() {
-		 if( isset($this->id) ) {
-			 $query = mysql_query( 'DELETE FROM '.$this->link_to.' WHERE id='.$this->id );
-
-			 if( $query ) {
-			 	 unset( $this );
-				 return true;
-			 }
-			 else {
-				 return false;
-			 }
+		 if( isset($this->variables['id']) ) {
+			 $query = 'DELETE FROM '.$this->link_to.' WHERE id='.$this->variables['id'];
+			 try {
+			 	 $STH = Connection::prepare()->query($query);
+				 if( $STH ) {
+				 	 unset( $this );
+				 	 foreach ($this->variables as $key => $value) {
+				 	 	$this->variables[$key] = '';
+				 	 }
+					 return true;
+				 }
+				 else {
+					 return false;
+				 }
+			 } catch (PDOException $e) {
+		  		echo $e->getMessage();
+		  	}
 		 }
 		 else {
 			 throw new Exception('You need to delete a specific '.$this->link_to);
@@ -204,24 +213,39 @@
 
 	 function link( $link ){
 	 	$this->link_to = $link;
+	 	// Find table variables
+	 	$q = Connection::prepare()->prepare("DESCRIBE $link");
+		$q->execute();
+		$variables = $q->fetchAll(PDO::FETCH_COLUMN);
+
+		foreach ($variables as $key => $value) {
+			$this->variables[$value] = '';
+		}
+	 }
+
+	 function publics_variables( $publics_variables ){
+	 	$this->publics_variables = $publics_variables;
+	 }
+
+	 function privates_variables( $privates_variables ){
+	 	$this->privates_variables = $privates_variables;
 	 }
 
 	 function _map( $object = null ) {
 	 	$CLASS_NAME = $this->link_to;
+	 	$id = $this->variables['id'];
 	 	if( isset($object) )  {
 	 		$search = $object::new_object()->link_to;
 	 		if( $this->search_for_link($search, "belongs_to") ) {
 	 			$link = $this->search_for_link($search, "belongs_to");
-	 			$query = "SELECT $search.* FROM $search JOIN $CLASS_NAME ON $CLASS_NAME.$link = $search.id WHERE $CLASS_NAME.id = $this->id";
-	 			
+	 			$query = "SELECT $search.* FROM $search JOIN $CLASS_NAME ON $CLASS_NAME.$link = $search.id WHERE $CLASS_NAME.id = $id";
 	 			$new_object = $object::new_object()->single_object_query($query);
 	 			
 	 			return $new_object;
 	 		}
 	 		elseif( $this->search_for_link($search, 'has_many') ) {
 	 			$link = $this->search_for_link($search, 'has_many');
-	 			$query = "SELECT $search.* FROM $search JOIN $CLASS_NAME ON $search.$link = $CLASS_NAME.id WHERE $CLASS_NAME.id = $this->id";
-
+	 			$query = "SELECT $search.* FROM $search JOIN $CLASS_NAME ON $search.$link = $CLASS_NAME.id WHERE $CLASS_NAME.id = $id";
 	 			$new_objects = $object::new_object()->multiple_objects($query);
 
 	 			return $new_objects;
@@ -230,9 +254,8 @@
 	 }
 
 	 private function search_for_link($object, $link) {
-	 	$find = false;	
-	 	
-	 	if(isset($this->map[$link])) {
+	 	$find = false;
+	 	if(isset($this->map[$link]) && !empty($this->map[$link])) {
 	 		foreach($this->map[$link] as $specific) {
 		 		if(array_search($object, $specific)) {
 		 			$find = $specific['link'];	
@@ -272,56 +295,69 @@
 	 }
 
 	 function __get( $key ) {
-		 if( isset( $key ) ) {
-			 return ( isset($this->$key) ? $this->$key : '' );
-		 }
-		 else {
-			 throw new Exception('WOOT nothing found');
-		 }
+		 	if( isset($this->variables[$key]) ) {
+				return ( $this->accessible_variable($key) ? $this->variables[$key] : '' );
+			}
+			else {
+				throw new Exception('WOOT nothing found');
+			}
 	 }
 	 function __set( $key, $value ) {
-		 if( isset( $key ) && isset( $value ) ) {
-			 $this->$key = $value;
+		 if( isset( $key ) && isset( $value )) {
+			 $this->variables[$key] = $value;
 		 }
 		 else {
 			 throw new Exception('WOOT You need to modify a specific value');
-		 }
+		}
+	 }
+
+	 private function accessible_variable( $key ){
+	 	if( isset($this->variables[$key]) ){
+	 		if( (count($this->publics_variables) > 0 && in_array($key, $this->publics_variables)) || count($this->publics_variables) === 0 ){
+	 			if( count($this->privates_variables) === 0 || (count($this->privates_variables) > 0 && !in_array($key, $this->privates_variables)) ){
+	 				return true;
+	 			}
+	 		}
+	 	}
+
+	 	return false;
 	 }
 
 	 private function single_object( $id = null ){
 		  if( isset( $id ) ) {
 		  	$table_name = $this->link_to;
-			$query = mysql_query( 'SELECT '.$table_name.'.* FROM '.$table_name.' WHERE id='.$id );
+		  	  
+		  	try {
+		  		$STH = Connection::prepare()->query('SELECT '.$table_name.'.* FROM '.$table_name.' WHERE id='.$id);
+		  		$STH->setFetchMode(PDO::FETCH_ASSOC);	
 
-			 if( $query && mysql_num_rows( $query ) >= 1 ) {
-				foreach( mysql_fetch_assoc( $query ) as $key=>$value ) {
-					$this->$key = $value;
-				}
-				return $this;
-			 }
-			 else {
-				 throw new Exception( 'No '.$table_name.' was find with this ID' );
-			 }
-		 }
-		 else {
-			 throw new Exception( 'You need to enter an ID' );
+		  		foreach( $STH->fetch() as $key=>$value ) {
+						$this->variables[$key] = $value;
+					}
+
+					return $this;
+		  	} catch (PDOException $e) {
+		  		echo $e->getMessage();
+		  	}
 		 }
 	 }
 
 	 private function single_object_query( $query = null ) {
 	 	if( isset( $query ) ) {
 	 		$table_name = $this->link_to;
-	 		$query = mysql_query( $query );
+	 		
+	 		try {
+		  		$STH = Connection::prepare()->query($query);
+		  		$STH->setFetchMode(PDO::FETCH_ASSOC);	
 
-			 if( $query && mysql_num_rows( $query ) >= 1 ) {
-				foreach( mysql_fetch_assoc( $query ) as $key=>$value ) {
-					$this->$key = $value;
-				}
-				return $this;
-			 }
-			 else {
-				 throw new Exception( 'No '.$table_name.' was find with this ID' );
-			 }
+		  		foreach( $STH->fetch() as $key=>$value ) {
+						$this->variables[$key] = $value;
+					}
+
+					return $this;
+	  	} catch (PDOException $e) {
+	  		echo $e->getMessage();
+	  	}
 	 	}
 	 } 
 
@@ -336,7 +372,7 @@
 			 $value = substr( $value, 0, strlen($value)-3 );
 
 			 $query = 'SELECT '.$table_name.'.* FROM '.$table_name.' WHERE '.$value;
-
+			 
 			 return $this->multiple_objects( $query );
 		 }
 		 else {
@@ -353,21 +389,31 @@
 	 function multiple_objects( $query ){
 	 	 $CLASS_NAME = $this->link_to;
 		 if( $query ){
-		 	$mysql_query = mysql_query( $query );
 		 	$objects = array();
-		 	$obj = self::new_object();
-			 while( $object = mysql_fetch_assoc( $mysql_query ) ){
-				 $obj = self::new_object();
-				 foreach( $object as $key => $value ){
-					 $obj->$key = $value;
-				 }
-				 $objects[$obj->id] = $obj;
-			 }
-			 $objects_array = new Model_array($objects);
-			 $objects_array->query($query);
-			 $objects_array->obj($obj);
+		 	$obj_vide = self::new_object();
 
-			 return $objects_array;
+
+	 		try {
+	  		$STH = Connection::prepare()->query($query);
+	  		$STH->setFetchMode(PDO::FETCH_ASSOC);	
+
+	  		while( $object = $STH->fetch() ){
+	  			$obj = self::new_object();
+					 foreach( $object as $key => $value ){
+						 $obj->variables[$key] = $value;
+					 }
+					 $objects[$obj->variables['id']] = $obj;
+	  		}
+
+	  		$objects_array = new Model_array($objects);
+			 	$objects_array->query($query);
+			 	$objects_array->obj($obj_vide);
+
+				return $objects_array;
+
+	  	} catch (PDOException $e) {
+	  		echo $e->getMessage();
+	  	}
 		 }
 		 else {
 			 throw new Exception('An eror happen when you try to find many '.$CLASS_NAME);
@@ -379,17 +425,21 @@
 		$keys   = '';
 	 	$values = '';
 	 	$table_name = $this->link_to;
-		foreach( get_class_vars( get_class( $this ) ) as $key=>$value ) {
-		 	if( isset( $this->$key ) && $key != 'class_name' && $key != 'map' && $key != 'comment' && $key != 'link_to') {
-			 	$keys .= $key.',';
-			 	$values .= '\''.$this->$key.'\',';
+		foreach( $this->variables as $key=>$value ) {
+		 	if( isset( $this->variables[$key] ) && !in_array($key, $this->dont_parse)) {
+			 	$keys[] = $key;
+			 	$values[] = '\''.$this->$key.'\'';
 		 	}
 	 	}
-	 	$keys = substr($keys, 0, strlen($keys)-1 );
-	 	$values = substr($values, 0, strlen($values)-1 );
-	 	$query = mysql_query( 'INSERT INTO '.$table_name.' ('.$keys.') VALUES('.$values.')');
-	 	if( $query ) {
-		 	$this->id = mysql_insert_id();
+
+	 	$keys = implode(',', $keys);
+	 	$values = implode(',', $values);
+	 	$query = 'INSERT INTO '.$table_name.' ('.$keys.') VALUES('.$values.')';
+
+	 	$pdo_object = Connection::prepare();
+	 	$STH = $pdo_object->query($query);
+	 	if( $STH ) {
+		 	$this->variables['id'] = $pdo_object->lastInsertId();
 		 	return true;
 	 	}
 	 	else
@@ -400,15 +450,16 @@
 
 	 private function update_object() {
 		$sets = '';
-		foreach( get_class_vars( get_class( $this ) ) as $key=>$value ) {
-		 	if( isset( $this->$key ) && $key != 'class_name' && $key != 'map' && $key != 'comment' && $key != 'link_to' ) {
-			 	$sets .= $key.'= \''. $this->$key.'\',';
+		foreach( $this->variables as $key=>$value ) {
+		 	if( isset( $this->variables[$key] ) && !in_array($key, $this->dont_parse) ) {
+			 	$sets[] = $key.'= \''. $this->$key.'\'';
 		 	}
 	 	}
-	 	$sets = substr($sets, 0, strlen($sets)-1 );
-	 	$query = mysql_query( 'UPDATE '.$this->link_to.' SET '.$sets.'WHERE id='.$this->id);
+	 	$sets = implode(',', $sets);
+	 	$query = 'UPDATE '.$this->link_to.' SET '.$sets.'WHERE id='.$this->variables['id'];
+	 	$STH = Connection::prepare()->query($query);
 
-	 	if( $query ) {
+	 	if( $STH ) {
 		 	return true;
 	 	}
 	 	else {
@@ -466,9 +517,9 @@
  		foreach( $order_by as $key=>$value) {
  			$order = ( !is_int($key) ? $value : 'ASC' );
  			$order_by = ( !is_int($key) ? $key : $value );
- 			$by.=$order_by.' '.$order.',';
+ 			$by[] =$order_by.' '.$order;
  		}
- 		$sort = substr($by, 0, -1);
+ 		$sort = implode(',', $by);
  		$query = $this->query.' ORDER BY '.$sort;
  
  		return $this->obj->multiple_objects( $query );
@@ -481,5 +532,30 @@
 
  		return $this->obj->multiple_objects( $query );
 	 }
+
+	 function _count(){
+	 	return count($this->getArrayCopy());
+	 }
  }
+ class Connection
+	{
+		static function prepare()
+		{
+			$host   = "localhost";
+			$dbname = "orm";
+			$user   = "root";
+			$pass   = "root";
+
+			try {  
+			  $DBH = new PDO("mysql:host=$host;dbname=$dbname", $user, $pass);  
+			  
+			  $DBH->setAttribute( PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION ); 
+				
+				return $DBH;
+			}  
+			catch(PDOException $e) {  
+		    echo $e->getMessage();  
+			}
+		}
+	} 
  ?>

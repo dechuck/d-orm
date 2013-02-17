@@ -1,6 +1,6 @@
 # D-orm
 
-D-orm is a little PHP ORM who is working with MySQL. It's an abstract class you extend on your other class.
+D-orm is a little PHP ORM who is working with the PDO object. It's an abstract class you extend on your other class.
 Your class need to reflect the table it represent.
 
 ### Notice
@@ -11,22 +11,13 @@ It's the first version of D-orm, there is still a lot to do.  If you have sugges
 	require_once 'model.php';
 	class Student extends Model
 	{
-		protected $id;
-		protected $name
-		protected $teacher_id;
-
 		function __construct()
 		{
 			$this->link('students');
 			$this->belongs_to('teacher', 'teacher_id');
+			$this->publics_variables(array('name'));
 		}
 	}
-	
-In the first time, you need to declare the variable you have in your database.
-	
-	protected $id;
-	protected $name
-	protected $teacher_id;
 	
  Then in your constructor, you need to connect the class with his table.
  	
@@ -41,6 +32,15 @@ In the first time, you need to declare the variable you have in your database.
  	$this->has_many('students', 'teacher_id');
  	
 The method **belongs_to** return just one object and the methods **has_many** can return multiple objects.
+
+You specify wich values are public with the method **publics_variables**
+	
+	$this->publics_variables(array('nom'));
+
+If you all your variables to be public except one or two, you can use the method **privates_variables** 
+
+	$this->privates_variables(array('id'));
+	
  	
 
 ## Interact with the model
