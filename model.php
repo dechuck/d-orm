@@ -55,14 +55,13 @@
 		$CLASS_NAME = $this->link_to;
 
 	 	if(!empty($array)) {
-	 		$where = 'WHERE ';
 	 		foreach( $array as $key=>$value) {
 	 			$where[] =$key.' = "'.$value;
 	 		}
 
 	 		$where = implode(' AND ', $where);
 
-	 		$query = 'SELECT '.$CLASS_NAME.'.* FROM '.$CLASS_NAME.' '.$where;
+	 		$query = 'SELECT '.$CLASS_NAME.'.* FROM '.$CLASS_NAME.' WHERE '.$where;
 	 		$this->the_query = $query;
 			return $this->multiple_objects( $query );
 	 	}
